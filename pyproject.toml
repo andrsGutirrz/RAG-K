@@ -1,0 +1,19 @@
+[project]
+name = "rag-k"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "black>=25.1.0",
+    "boto3>=1.38.36",
+    "dotenv>=0.9.9",
+    "faiss-cpu>=1.11.0",
+    "langchain>=0.3.25",
+    "langchain-aws>=0.2.26",
+    "langchain-community>=0.3.25",
+    "pgvector>=0.4.1",
+    "pre-commit>=4.2.0",
+    "psycopg2-binary>=2.9.10",
+    "pypdf>=5.6.0",
+]
