@@ -7,6 +7,8 @@ Uses AWS Bedrock, LangChain, FAISS, and PostgreSQL for local RAG implementation
 import os
 import psycopg2
 from dotenv import load_dotenv
+import json
+import re
 
 import boto3
 import numpy as np
@@ -15,9 +17,9 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings, BedrockLLM
 from langchain.vectorstores import FAISS
 from langchain.schema import Document
-from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_stuff_documents_chain
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 
 # Load environment variables
@@ -52,22 +54,50 @@ class UNOGameRAG:
         self.qa_chain = None
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extract text from PDF"""
+        """Extract text from PDF with preprocessing"""
         reader = PdfReader(pdf_path)
         text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
+        for page_num, page in enumerate(reader.pages, 1):
+            page_text = page.extract_text()
+            # Add page header
+            text += f"\n=== Page {page_num} ===\n"
+            text += page_text + "\n"
         return text
 
     def split_text(self, text: str) -> list[Document]:
-        """Split text into chunks"""
+        """Split text into meaningful chunks with metadata"""
+        # Preprocess text: remove extra whitespace and normalize
+        text = text.strip()
+        text = re.sub(r"\s+", " ", text)
+
+        # Use semantic splitting with larger chunks and overlap
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
+            chunk_size=1500,
+            chunk_overlap=300,
             length_function=len,
+            separators=["\n=== Page ", "\n\n", "\n", " "],
         )
+
         chunks = text_splitter.split_text(text)
-        return [Document(page_content=chunk) for chunk in chunks]
+
+        # Create documents with metadata
+        documents = []
+        for i, chunk in enumerate(chunks):
+            # Extract page numbers from chunk
+            page_numbers = set()
+            for match in re.finditer(r"=== Page (\d+) ===", chunk):
+                page_numbers.add(int(match.group(1)))
+
+            # Create metadata
+            metadata = {
+                "page_numbers": list(page_numbers),
+                "chunk_position": i + 1,
+                "total_chunks": len(chunks),
+            }
+
+            documents.append(Document(page_content=chunk, metadata=metadata))
+
+        return documents
 
     def check_vectors_in_db(self) -> bool:
         """Check if vectors already exist in database"""
@@ -99,7 +129,7 @@ class UNOGameRAG:
                 cur.execute(
                     """INSERT INTO document_embeddings (content, embedding, metadata)
                        VALUES (%s, %s, %s)""",
-                    (doc.page_content, embedding, {}),
+                    (doc.page_content, embedding, json.dumps({})),
                 )
 
             conn.commit()
@@ -110,15 +140,25 @@ class UNOGameRAG:
             print(f"Error saving to database: {e}")
             raise
 
-    def load_vectors_from_db(self) -> list[tuple]:
-        """Load vectors from PostgreSQL"""
+    def load_vectors_from_db(self) -> list[tuple[str, list[float]]]:
+        """Load vectors from PostgreSQL and convert embeddings to float lists"""
         try:
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
             cur.execute("SELECT content, embedding FROM document_embeddings")
             results = cur.fetchall()
             conn.close()
-            return results
+
+            # Convert vector strings to float lists
+            processed_results = []
+            for content, embedding_str in results:
+                # Remove brackets and split by commas
+                embedding_list = [
+                    float(x.strip()) for x in embedding_str.strip("[]").split(",")
+                ]
+                processed_results.append((content, embedding_list))
+
+            return processed_results
         except Exception as e:
             print(f"Error loading from database: {e}")
             return []
@@ -163,7 +203,7 @@ class UNOGameRAG:
 
     def setup_qa_chain(self):
         """Setup QA chain using new langchain approach"""
-        retriever = self.vectorstore.as_retriever(search_kwargs={"k": 3})
+        retriever = self.vectorstore.as_retriever(search_kwargs={"k": 2})
 
         system_prompt = (
             "Use the given context to answer questions about UNO game rules. "
