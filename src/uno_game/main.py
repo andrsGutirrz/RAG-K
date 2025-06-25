@@ -8,19 +8,16 @@ import os
 import psycopg2
 from dotenv import load_dotenv
 import json
-import re
 
+from chunker import Chunker
 import boto3
-import numpy as np
-from pypdf import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings, BedrockLLM
 from langchain.vectorstores import FAISS
 from langchain.schema import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -41,7 +38,7 @@ class UNOGameRAG:
             "EMBEDDING_MODEL", "amazon.titan-embed-text-v1"
         )
         self.llm_model = os.getenv("LLM_MODEL", "amazon.titan-text-express-v1")
-        self.pdf_path = "src/data/uno_rules.pdf"
+        self.pdf_path = "src/data/UNO.pdf"
 
         # Initialize AWS clients
         session = boto3.Session(profile_name="personal")
@@ -52,52 +49,7 @@ class UNOGameRAG:
         self.llm = BedrockLLM(client=self.bedrock, model_id=self.llm_model)
         self.vectorstore = None
         self.qa_chain = None
-
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extract text from PDF with preprocessing"""
-        reader = PdfReader(pdf_path)
-        text = ""
-        for page_num, page in enumerate(reader.pages, 1):
-            page_text = page.extract_text()
-            # Add page header
-            text += f"\n=== Page {page_num} ===\n"
-            text += page_text + "\n"
-        return text
-
-    def split_text(self, text: str) -> list[Document]:
-        """Split text into meaningful chunks with metadata"""
-        # Preprocess text: remove extra whitespace and normalize
-        text = text.strip()
-        text = re.sub(r"\s+", " ", text)
-
-        # Use semantic splitting with larger chunks and overlap
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1500,
-            chunk_overlap=300,
-            length_function=len,
-            separators=["\n=== Page ", "\n\n", "\n", " "],
-        )
-
-        chunks = text_splitter.split_text(text)
-
-        # Create documents with metadata
-        documents = []
-        for i, chunk in enumerate(chunks):
-            # Extract page numbers from chunk
-            page_numbers = set()
-            for match in re.finditer(r"=== Page (\d+) ===", chunk):
-                page_numbers.add(int(match.group(1)))
-
-            # Create metadata
-            metadata = {
-                "page_numbers": list(page_numbers),
-                "chunk_position": i + 1,
-                "total_chunks": len(chunks),
-            }
-
-            documents.append(Document(page_content=chunk, metadata=metadata))
-
-        return documents
+        self.chunker = Chunker(self.pdf_path)
 
     def check_vectors_in_db(self) -> bool:
         """Check if vectors already exist in database"""
@@ -190,8 +142,7 @@ class UNOGameRAG:
 
     def _create_new_vectorstore(self):
         """Create new vectorstore from PDF"""
-        text = self.extract_text_from_pdf(self.pdf_path)
-        documents = self.split_text(text)
+        documents = self.chunker.split_documents()
 
         # Save to database
         self.save_vectors_to_db(documents)
@@ -203,7 +154,12 @@ class UNOGameRAG:
 
     def setup_qa_chain(self):
         """Setup QA chain using new langchain approach"""
-        retriever = self.vectorstore.as_retriever(search_kwargs={"k": 2})
+        retriever = self.vectorstore.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "threshold": 0.5,
+            }
+        )
 
         system_prompt = (
             "Use the given context to answer questions about UNO game rules. "
@@ -243,7 +199,6 @@ def main():
     rag = UNOGameRAG()
     rag.setup()
 
-    # Interactive loop
     print("\n🎮 UNO Game Rules Assistant")
     print("Ask questions about UNO rules (type 'quit' to exit)")
     print("-" * 50)

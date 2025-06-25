@@ -12,6 +12,7 @@ dependencies = [
     "langchain>=0.3.25",
     "langchain-aws>=0.2.26",
     "langchain-community>=0.3.25",
+    "numpy>=1.26.4",
     "pgvector>=0.4.1",
     "pre-commit>=4.2.0",
     "psycopg2-binary>=2.9.10",
