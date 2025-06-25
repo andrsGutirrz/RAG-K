@@ -57,7 +57,6 @@ The project uses the following key dependencies:
 - `langchain`: For building the RAG pipeline
 - `langchain-aws`: For AWS Bedrock integration
 - `pgvector`: For PostgreSQL vector storage
-- `pypdf`: For PDF document processing
 
 ## 🚀 Usage
 
@@ -71,6 +70,14 @@ The project uses the following key dependencies:
 ```bash
 uv run src/uno_game/main.py
 ```
+
+### Some questions
+<img width="746" alt="image" src="https://github.com/user-attachments/assets/32c63937-fbff-4f6a-ac63-83ff2230f4b0" />
+
+
+### But it is not perfect
+<img width="946" alt="image" src="https://github.com/user-attachments/assets/ead3f82b-b61e-4a26-b8ee-629aa5da61e6" />
+
 
 ## 📊 Models Used
 
